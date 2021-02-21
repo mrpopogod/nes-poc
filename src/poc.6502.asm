@@ -7,70 +7,84 @@
   .setting "ShowLabelsAfterCompiling", true
   .setting "ShowLocalLabelsAfterCompiling", true
 
-  ; CONSTANTS
-
-  ; PPU Registers
-PPUCTRL     = $2000
-PPUMASK     = $2001
-PPUSTATUS   = $2002
-OAMADDR     = $2003
-OAMDATA     = $2004
-PPUSCROLL   = $2005
-PPUADDR     = $2006
-PPUDATA     = $2007
-OAMDMA      = $4014
-
-  ; APU Registers
-SQ1_VOL     = $4000
-SQ1_SWEEP   = $4001
-SQ1_LO      = $4002
-SQ1_HI      = $4003
-SQ2_VOL     = $4004
-SQ2_SWEEP   = $4005
-SQ2_LO      = $4006
-SQ2_HI      = $4007
-TRI_LINEAR  = $4008
-TRI_LO      = $400A
-TRI_HI      = $400B
-NOISE_VOL   = $400C
-NOISE_LO    = $400E
-NOISE_HI    = $400F
-SND_CHN     = $4015
-
-  ; Controller Registers
-JOY1        = $4016
-JOY2        = $4017
-
-  ; MMC1 Registers
-MMC1LOAD    = $8000
-MMC1CONTROL = $8000
-MMC1_CHR0   = $A000
-MMC1_CHR1   = $C000
-MMC1_PRG    = $E000
+  ; Constants for Registers for Readability
+.include "register_defs.6502.asm"
 
   ; Variables in RAM
   .segment "RAM"
   .org $0000
 
   .org $0100
-stack       .ds 256     ; block off the stack
+stack         .ds 256     ; block off the stack
 
   .org $0200
-sprites     .ds 256     ; sprite OAM loading destination
+spriteBuffer  .ds 256     ; sprite OAM loading destination
 
   .org $6000
-batteryram  .ds 8192    ; battery backup space - turn this into real variables
+batteryram    .ds 8192    ; battery backup space - turn this into real variables
 
   .bank 0, 16, $8000, "NES_PRG0"
 
+; Gonna have a bunch of different banks for data and maybe different subsystems (e.g. a menu bank)
+
   .bank 15, 16, $C000, "NES_PRG1"   ; rename this to be whatever the last actual PRG is
 
-; TODO: lots of actual code and other shit
+  .segment "INITIALIZATION", 15
+  .org $C000
+RESET:
+  SEI                     ; disable IRQs
+  CLD                     ; disable decimal mode
+  LDX #$40
+  STX APU_CNTR            ; diable APU frame IRQ
+  LDX #$FF
+  TXS                     ; set up stack
+  INX                     ; wrap X to 0
+  STX PPUCTRL             ; disable NMI
+  STX PPUMASK             ; disable rendering
+  STX DMC_FREQ            ; disable DMC IRQs
 
-  .segment "INTERRUPT_VECTORS"
+vblankwait1:              ; wait for a vblank
+  BIT PPUSTATUS
+  BPL vblankwait1
+
+clrmem:                   ; zero out all RAM, but set the OAM segment to be offscreen
+  LDA #$00
+  STA $0000, X
+  STA $0100, X
+  STA $0300, X
+  STA $0400, X
+  STA $0500, X
+  STA $0600, X
+  STA $0700, X
+  LDA #$FE
+  STA spriteBuffer, X
+  INX
+  BNE clrmem
+
+vblankwait2:              ; a second vblank means PPU is ready
+  BIT PPUSTATUS
+  BPL vblankwait2
+
+  LDA #%10000000          ; intensify blues
+  STA PPUMASK             ; just a "it's a valid program" check
+
+; TODO: other power-on init here, such as palettes, initial screen, ensuring the right
+; bank is loaded in $8000.
+; Also initialize any initial variable state
+
+GameLoop:                 ; The main loop where we do any ongoing logic, much should be deferred
+                          ; to methods in individual banks
+  JMP GameLoop
+
+NMIHandler:
+  ; TODO: Code that handles graphics updates, like sprite loading and whatever
+  ; is in the background buffer (don't want to do calculations here)
+  RTI
+
+  .segment "INTERRUPT_VECTORS", 15
   .org $FFFA
-  .w NMIHandler
+  .w NMIHandler           
   .w RESET
-  .w 0
+  .w 0                    ; no external IRQ
 
   .bank 16, 8, $0000, "NES_CHR0"   ; add as many CHRs as needed - have 8kb window, but can swap high and low 4kb
