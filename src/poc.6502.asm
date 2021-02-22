@@ -2,10 +2,10 @@
   .format "nes"
   .setting "NESMapper", 1                   ; MMC1
   .setting "NESBatteryBackedWRAM", true     ; Support saving
-  .setting "LaunchCommAND", "c:\\emulation\\fceux.exe {0}"
-  .setting "DebugCommAND", "c:\\emulation\\fceux.exe {0}"
   .setting "ShowLabelsAfterCompiling", true
   .setting "ShowLocalLabelsAfterCompiling", true
+  .setting "LaunchCommAND", "c:\\emulation\\fceux.exe {0}"
+  .setting "DebugCommAND", "c:\\emulation\\fceux.exe {0}"
 
   ; Constants for Registers for Readability
 .include "register_defs.6502.asm"
@@ -18,14 +18,14 @@
 stack         .ds 256     ; block off the stack
 
   .org $0200
-spriteBuffer  .ds 256     ; sprite OAM loading destination
+spritebuffer  .ds 256     ; sprite OAM loading destination
 
   .org $6000
 batteryram    .ds 8192    ; battery backup space - turn this into real variables
 
   .bank 0, 16, $8000, "NES_PRG0"
 
-; Gonna have a bunch of different banks for data and maybe different subsystems (e.g. a menu bank)
+; TODO: Gonna have a bunch of different banks for data and maybe different subsystems (e.g. a menu bank)
 
   .bank 15, 16, $C000, "NES_PRG1"   ; rename this to be whatever the last actual PRG is
 
@@ -57,7 +57,7 @@ clrmem:                   ; zero out all RAM, but set the OAM segment to be offs
   STA $0600, X
   STA $0700, X
   LDA #$FE
-  STA spriteBuffer, X
+  STA spritebuffer, X
   INX
   BNE clrmem
 
@@ -77,8 +77,20 @@ GameLoop:                 ; The main loop where we do any ongoing logic, much sh
   JMP GameLoop
 
 NMIHandler:
+  PHA
+  TXA
+  PHA
+  TYA
+  PHA                     ; Back up registers because the interrupt could have fired in the middle of something
+  
   ; TODO: Code that handles graphics updates, like sprite loading and whatever
   ; is in the background buffer (don't want to do calculations here)
+
+  PLA
+  TAY
+  PLA
+  TAX
+  PLA                     ; Restore register state before NMI triggered
   RTI
 
   .segment "INTERRUPT_VECTORS", 15
