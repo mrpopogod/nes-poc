@@ -141,6 +141,8 @@ ReadJoypad:
     STA joypad1_pressed
     RTS
 
+    .include "random_table.6502.asm"
+
     .org $FFFA
     .w NMIHandler           
     .w RESET
