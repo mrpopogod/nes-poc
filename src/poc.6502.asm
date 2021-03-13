@@ -12,18 +12,24 @@
 
     ; Variables in RAM
     .segment "RAM"
-    .org $0000
+    .org $0000                      ; Zero page
 joypad1                 .ds 1       ; Button states for current frame
 joypad1_old             .ds 1       ; Last frame's button states
 joypad1_pressed         .ds 1       ; Current frame's off_to_on transition
 sleeping                .ds 1       ; Main program sets this and then waits for NMI to clear it
 random_offset           .ds 1       ; Pointer to the current offset in our random table
 
-    .org $0100
+    .org $0100                      ; The stack
 stack                   .ds 256     ; block off the stack
 
-    .org $0200
+    .org $0200                      ; Sprite buffer for OAM
 spritebuffer            .ds 256     ; sprite OAM loading destination
+
+    .org $0300                      ; Sound engine RAM
+apu                     .ds 256
+
+    .org $0400                      ; Other RAM
+mmc1_write_status       .ds 1       ; Flags whether the serial write has been interrupted; 7 = configure, 6 = prg load
 
     .org $6000
 batteryram              .ds 8192    ; battery backup space - turn this into real variables
@@ -41,10 +47,13 @@ RESET:
     CLD                             ; disable decimal mode
     LDX #$FF
     TXS                             ; set up stack
+    STX MMC1LOAD                    ; Reset the mapper to a known good state
     INX                             ; wrap X to 0
     STX PPUCTRL                     ; disable NMI
     STX PPUMASK                     ; disable rendering
     STX DMC_FREQ                    ; disable DMC IRQs
+    LDA #%00001110                   ; vertical mirroring, lock $C000 to last bank and switch the $8000 bank, 8k CHR since we're using CHR RAM
+    JSR MMC1Configure
 
 @vblankwait1:                       ; wait for a vblank
     BIT PPUSTATUS
@@ -139,6 +148,56 @@ ReadJoypad:
     EOR #$FF                        ; Invert to find what wasn't pressed
     AND joypad1                     ; So figure out what was newly pressed
     STA joypad1_pressed
+    RTS
+
+; Configure the MMC1
+; - input - A
+; - modifies - A
+MMC1Configure:
+    PHA
+@beginconfigure:
+    LDA mmc1_write_status
+    AND #%01111111                  ; Clear the configure interrupted flag
+    STA mmc1_write_status
+    PLA                             ; Load the value we want to set from the stack, either the initial A or the one we saved on the next line
+    PHA                             ; Save a copy on the stack in case we get interrupted
+    STA MMC1CONTROL
+    LSR A
+    STA MMC1CONTROL
+    LSR A
+    STA MMC1CONTROL
+    LSR A
+    STA MMC1CONTROL
+    LSR A
+    STA MMC1CONTROL
+    BIT mmc1_write_status           ; Value of bit 7 goes into N (negative flag)
+    BNE @beginconfigure
+    PLA                             ; Pop what we saved on the stack so we clean up after ourselves
+    RTS
+
+; Switch the PRG bank
+; - input - A
+; - modifies - A
+MMC1LoadPRGBank:
+    PHA
+@beginloadprgbank:
+    LDA mmc1_write_status
+    AND #%10111111                  ; Clear the load prg interrupted flag
+    STA mmc1_write_status
+    PLA                             ; Load the value we want to set from the stack, either the initial A or the one we saved on the next line
+    PHA                             ; Save a copy on the stack in case we get interrupted
+    STA MMC1_PRG
+    LSR A
+    STA MMC1_PRG
+    LSR A
+    STA MMC1_PRG
+    LSR A
+    STA MMC1_PRG
+    LSR A
+    STA MMC1_PRG
+    BIT mmc1_write_status           ; Value of bit 6 goes into V (overflow flag)
+    BVS beginloadprgbank            ; If our serial write gets interrupted we need to start over (e.g. NMI does bank switching)
+    PLA                             ; Pop what we saved on the stack so we clean up after ourselves
     RTS
 
     .include "random_table.6502.asm"
