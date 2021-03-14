@@ -229,4 +229,4 @@ MMC1NMILoadPRGBank:
     .w RESET
     .w IRQHandler
 
-    .bank 16, 8, $0000, "NES_CHR0"   ; add as many CHRs as needed - have 8kb window, but can swap high and low 4kb
+    .bank 16, 8, $0000, "NES_CHR0"   ; add as many CHRs as needed - have 8kb window, but can swap high and low 4kb, delete if end up using CHR RAM
