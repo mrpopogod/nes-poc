@@ -29,12 +29,17 @@ spritebuffer            .ds 256     ; sprite OAM loading destination
 apu                     .ds 256
 
     .org $0400                      ; Other RAM
-mmc1_write_status       .ds 1       ; Flags whether the serial write has been interrupted; 7 = configure, 6 = prg load
+mmc1_interrupted        .ds 1       ; Flags whether the serial write has been interrupted; 1 is interrupted
+mmc1_current_bank       .ds 1       ; What bank the main program is on so the NMI can swap back to it as necessary
+mmc1_current_config     .ds 1       ; How the MMC1 is configured so the NMI can restore it if it needed to change it
 
     .org $6000
 batteryram              .ds 8192    ; battery backup space - turn this into real variables
 
     .bank 0, 16, $8000, "NES_PRG0"
+
+; This is just to see how much space this eats up
+    .include "test_map.6502.asm"
 
 ; TODO: Gonna have a bunch of different banks for data and maybe different subsystems (e.g. a menu bank)
 
@@ -111,6 +116,21 @@ NMIHandler:
   ; TODO: Code that handles graphics updates, like sprite loading and whatever
   ; is in the background buffer (don't want to do calculations here)
 
+    LDA mmc1_current_bank           ; Example: make sure we're in bank 0
+    CMP #$00
+    BEQ @noswitch
+    LDA #80
+    STA MMC1LOAD                    ; Reset any operations in progress
+    LDA #$00
+    JSR MMC1NMILoadPRGBank          ; Swap to bank 0
+    ; --- do something with the code in bank 0
+    LDA mmc1_current_bank
+    JSR MMC1NMILoadPRGBank          ; Restore the bank the main code was using
+    LDA #$01
+    STA mmc1_interrupted            ; Set the interrupted flag
+@noswitch:
+
+    ; Tasks to do at the end of every NMI
     INC random_offset               ; Pop a random number every frame
     LDA #$00
     STA sleeping                    ; Wake up the main program
@@ -153,14 +173,16 @@ ReadJoypad:
 ; Configure the MMC1
 ; - input - A
 ; - modifies - A
+; - MMC1NMIConfigure - sub call for the NMI so it won't override the configuration the main code wants set
 MMC1Configure:
-    PHA
+    STA mmc1_current_config         ; Save our configuration in case NMI needs to change it
 @beginconfigure:
-    LDA mmc1_write_status
-    AND #%01111111                  ; Clear the configure interrupted flag
-    STA mmc1_write_status
-    PLA                             ; Load the value we want to set from the stack, either the initial A or the one we saved on the next line
-    PHA                             ; Save a copy on the stack in case we get interrupted
+    LDA mmc1_current_config         ; If we had to loop this will restore A so we can restart
+MMC1NMIConfigure:
+    PHA
+    LDA #$00                        ; Clear the mmc1 interrupted flag
+    STA mmc1_interrupted
+    PLA
     STA MMC1CONTROL
     LSR A
     STA MMC1CONTROL
@@ -170,22 +192,23 @@ MMC1Configure:
     STA MMC1CONTROL
     LSR A
     STA MMC1CONTROL
-    BIT mmc1_write_status           ; Value of bit 7 goes into N (negative flag)
-    BNE @beginconfigure
-    PLA                             ; Pop what we saved on the stack so we clean up after ourselves
+    LDA mmc1_interrupted
+    BNE @beginconfigure             ; If our serial write gets interrupted we need to start over (e.g. NMI did some bank switching)
     RTS
 
 ; Switch the PRG bank
 ; - input - A
 ; - modifies - A
+; - MMC1NMILoadPRGBank - sub call for the NMI so it won't override the bank the main code wants to have set
 MMC1LoadPRGBank:
-    PHA
+    STA mmc1_current_bank           ; Save the bank we're switching to; if NMI needs to swap banks later it can use this to swap back at the end
 @beginloadprgbank:
-    LDA mmc1_write_status
-    AND #%10111111                  ; Clear the load prg interrupted flag
-    STA mmc1_write_status
-    PLA                             ; Load the value we want to set from the stack, either the initial A or the one we saved on the next line
-    PHA                             ; Save a copy on the stack in case we get interrupted
+    LDA mmc1_current_bank           ; If we never get interrupted a bit wasteful, but this handles restoring state if we have to retry after an NMI
+MMC1NMILoadPRGBank:
+    PHA
+    LDA #$00                        ; Clear the mmc1 interrupted flag
+    STA mmc1_interrupted
+    PLA
     STA MMC1_PRG
     LSR A
     STA MMC1_PRG
@@ -195,9 +218,8 @@ MMC1LoadPRGBank:
     STA MMC1_PRG
     LSR A
     STA MMC1_PRG
-    BIT mmc1_write_status           ; Value of bit 6 goes into V (overflow flag)
-    BVS beginloadprgbank            ; If our serial write gets interrupted we need to start over (e.g. NMI does bank switching)
-    PLA                             ; Pop what we saved on the stack so we clean up after ourselves
+    LDA mmc1_interrupted
+    BNE @beginloadprgbank           ; If our serial write gets interrupted we need to start over (e.g. NMI did some bank switching)
     RTS
 
     .include "random_table.6502.asm"
