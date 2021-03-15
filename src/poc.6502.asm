@@ -176,7 +176,7 @@ ReadJoypad:
 ; - MMC1NMIConfigure - sub call for the NMI so it won't override the configuration the main code wants set
 MMC1Configure:
     STA mmc1_current_config         ; Save our configuration in case NMI needs to change it
-@beginconfigure:
+beginmmc1configure:
     LDA mmc1_current_config         ; If we had to loop this will restore A so we can restart
 MMC1NMIConfigure:
     PHA
@@ -193,7 +193,7 @@ MMC1NMIConfigure:
     LSR A
     STA MMC1CONTROL
     LDA mmc1_interrupted
-    BNE @beginconfigure             ; If our serial write gets interrupted we need to start over (e.g. NMI did some bank switching)
+    BNE beginmmc1configure             ; If our serial write gets interrupted we need to start over (e.g. NMI did some bank switching)
     RTS
 
 ; Switch the PRG bank
@@ -202,7 +202,7 @@ MMC1NMIConfigure:
 ; - MMC1NMILoadPRGBank - sub call for the NMI so it won't override the bank the main code wants to have set
 MMC1LoadPRGBank:
     STA mmc1_current_bank           ; Save the bank we're switching to; if NMI needs to swap banks later it can use this to swap back at the end
-@beginloadprgbank:
+beginmmc1loadprgbank:
     LDA mmc1_current_bank           ; If we never get interrupted a bit wasteful, but this handles restoring state if we have to retry after an NMI
 MMC1NMILoadPRGBank:
     PHA
@@ -219,7 +219,7 @@ MMC1NMILoadPRGBank:
     LSR A
     STA MMC1_PRG
     LDA mmc1_interrupted
-    BNE @beginloadprgbank           ; If our serial write gets interrupted we need to start over (e.g. NMI did some bank switching)
+    BNE beginmmc1loadprgbank           ; If our serial write gets interrupted we need to start over (e.g. NMI did some bank switching)
     RTS
 
     .include "random_table.6502.asm"
