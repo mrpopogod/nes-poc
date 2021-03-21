@@ -22,6 +22,8 @@ random_offset           .ds 1       ; Pointer to the current offset in our rando
 camera_x                .ds 1       ; X position of the camera relative to the upper left of the map
 camera_y                .ds 1       ; Y position of the camera relative to the upper left of the map
 player_frame            .ds 1       ; Animation frame for the player movement
+button_mask             .ds 1       ; Temp holder for a button mask we want to iterate through
+addend                  .ds 1       ; Temp variable when we want to add X or Y to A (STX addend)
 
     .org $0100                      ; The stack
 stack                   .ds 256     ; block off the stack
@@ -113,7 +115,7 @@ InitialSprites:
     STA ptr1
     LDA #>playerdown0
     STA ptr1+1
-    JSR LoadPlayerSprite
+    JSR LoadPlayerMapSprite
 
 ; Fixed CHR RAM load for now
 CopyTiles:
@@ -148,7 +150,8 @@ GameLoop:
     BNE @sleep                      ; Wait for NMI to clear the sleeping flag
 
     JSR ReadJoypad
-    JSR UpdatePlayerSprite
+    ; TODO: this should be gated behind the overall game state (map, battle, menu, etc)
+    JSR UpdatePlayerMapSprite
     ; TODO: any logic we want to handle
     ; handling the inputs
     ; preparing the drawing buffer
@@ -158,6 +161,7 @@ IRQHandler:
     RTI
 
 NMIHandler:
+    PHP                             ; Back up flags; must be done first because PLA modifies flags
     PHA
     TXA
     PHA
@@ -188,6 +192,7 @@ NMIHandler:
 
     ; Tasks to do at the end of every NMI
     INC player_frame                ; Update the animation frame counter once per frame
+                                    ; TODO - should this only increment when moving?  When I have more written see how it feels
     INC random_offset               ; Pop a random number every frame
     LDA #$00
     STA sleeping                    ; Wake up the main program
@@ -197,6 +202,7 @@ NMIHandler:
     PLA
     TAX
     PLA                             ; Restore register state before NMI triggered
+    PLP                             ; Restore flags before NMI triggered - must be done last because PLA sets flags
     RTI
 
 ; Capture the current button state and transitions
@@ -227,135 +233,82 @@ ReadJoypad:
     STA joypad1_pressed
     RTS
 
-; Update the player's sprite based on what's going on
+; Update the player's sprite based on what's going on in map mode
 ; - modifies - A, Y, ptr1
 ; TODO: see if I can refactor this to be more offset based and save a bunch of code lines
 ; TODO: this will also need to account for collision; if we're against a wall don't move in that direction
-UpdatePlayerSprite:
-@checkup:
+UpdatePlayerMapSprite:
+    LDA #%00001000                  ; Start off looking at up
+    STA button_mask
+@buttonloop:
     LDA joypad1
-    AND #%00001000
-    BEQ @checkdown
-    LDA player_frame
+    AND button_mask
+    BNE @found                      ; We found a pressed ubtton
+    LSR button_mask                 ; Check the next button
+    BEQ @done                       ; The mask is now 0, which means no buttons were pressed
+    BCC @buttonloop                 ; Carry is always 0 except when the mask goes from 1->0, which is handled by the BEQ above
+@done:
+    RTS                             ; No relevant buttons pressed, nothing to do
+@found:                              ; button_mask now has the button that was pressed
+    LDY #$00
+@offsetloop:
+    LSR button_mask                 ; Each button past the first needs to add 16 to the offset
+    BCS @doneoffset
+    TYA
+    ADC #$10                        ; We know the carry is clear if we get to this line
+    TAY
+    BNE @offsetloop                 ; We know the offset is at least 16 at this point (and won't wrap), so save a cycle
+@doneoffset:
+    LDA player_frame                ; Need to determine if we are in the second frame of our walking animation
     AND #$08
-    BNE @upframe1
-    LDA #<playerup0
-    STA ptr1
-    LDA #>playerup0
-    STA ptr1+1
-    JMP LoadPlayerSprite
-@upframe1:
-    LDA #<playerup1
-    STA ptr1
-    LDA #>playerup1
-    STA ptr1+1
-    JMP LoadPlayerSprite
-@checkdown:
-    LDA joypad1
-    AND #%00000100
-    BEQ @checkleft
-    LDA player_frame
-    AND #$08
-    BNE @downframe1
-    LDA #<playerdown0
-    STA ptr1
-    LDA #>playerdown0
-    STA ptr1+1
-    JMP LoadPlayerSprite
-@downframe1:
-    LDA #<playerdown1
-    STA ptr1
-    LDA #>playerdown1
-    STA ptr1+1
-    JMP LoadPlayerSprite
-@checkleft:
-    LDA joypad1
-    AND #%00000010
-    BEQ @checkright
-    LDA player_frame
-    AND #$08
-    BNE @leftframe1
-    LDA #<playerleft0
-    STA ptr1
-    LDA #>playerleft0
-    STA ptr1+1
-    JMP LoadPlayerSprite
-@leftframe1:
-    LDA #<playerleft1
-    STA ptr1
-    LDA #>playerleft1
-    STA ptr1+1
-    JMP LoadPlayerSprite
-@checkright:
-    LDA joypad1
-    AND #%00000001
-    BEQ @done
-    LDA player_frame
-    AND #$08
-    BNE @rightframe1
-    LDA #<playerright0
+    BEQ @setptr
+    TYA
+    CLC                             ; Carry is definitely set; the branch that gut us here was carry set and subsequent operations don't touch it
+    ADC #$08                        ; If we're in the second frame then offset by an additional 8
+    TAY
+@setptr:
+    LDA #<playerright0              ; Start at the first address of sprite values
+    CLC
+    STY addend
+    ADC addend                      ; Add our calculated offset
     STA ptr1
     LDA #>playerright0
+    ADC #$00                        ; Don't forget to carry the one (if needed)
     STA ptr1+1
-    JMP LoadPlayerSprite
-@rightframe1:
-    LDA #<playerright1
-    STA ptr1
-    LDA #>playerright1
-    STA ptr1+1
-    JMP LoadPlayerSprite
-@done:
-    RTS
+    JMP LoadPlayerMapSprite         ; Now that we know what we need to be, get it into OAM
 
-; Loads the appropriate player sprite given the memory in ptr1
+; Loads the appropriate player sprite defined at ptr1
+; Used whenever we're in map mode
+; Player is always the first four sprites in OAM
 ; - input - ptr1
 ; - modifies - A, Y
-LoadPlayerSprite:
-    ; TODO - Can I collapse this down so it isn't fully unrolled?
-    LDY #$00
-    LDA #$70                        ; Y pos to put metasprite in center
+LoadPlayerMapSprite:
+    LDA #$70
     STA spritebuffer
-    LDA (ptr1), Y
-    STA spritebuffer+1
-    INY
-    LDA (ptr1), Y
-    STA spritebuffer+2
-    INY
-    LDA #$70                        ; X pos to put metasprite in center
     STA spritebuffer+3
-
-    LDA #$70                        ; Y pos to put metasprite in center
     STA spritebuffer+4
-    LDA (ptr1), Y
-    STA spritebuffer+5
-    INY
-    LDA (ptr1), Y
-    STA spritebuffer+6
-    INY
-    LDA #$78                        ; X pos to put metasprite in center
-    STA spritebuffer+7
-    
-    LDA #$78                        ; Y pos to put metasprite in center
-    STA spritebuffer+8
-    LDA (ptr1), Y
-    STA spritebuffer+9
-    INY
-    LDA (ptr1), Y
-    STA spritebuffer+10
-    INY
-    LDA #$70                        ; X pos to put metasprite in center
     STA spritebuffer+11
-    
-    LDA #$78                        ; Y pos to put metasprite in center
+    LDA #$78
+    STA spritebuffer+7
+    STA spritebuffer+8
     STA spritebuffer+12
+    STA spritebuffer+15             ; Set up X and Y coords for the four tiles to be centered
+
+    LDY #$00
+    LDX #$01                        ; Need both X and Y because the ptr1 marches by 1 each time, while OAM is 1 and then 3
+@loop:                              ; Write the actual tile and attribute data
     LDA (ptr1), Y
-    STA spritebuffer+13
+    STA spritebuffer, X
+    INX
     INY
     LDA (ptr1), Y
-    STA spritebuffer+14
+    STA spritebuffer, X
+    INX
+    INX
+    INX
     INY
-    LDA #$78                        ; X pos to put metasprite in center
-    STA spritebuffer+15
+    CPX #$0E
+    BCC @loop                       ; the last one we want to write is 14 
     RTS
 
 ; Configure the MMC1
@@ -418,23 +371,23 @@ palette:
     .byte $0F, $2D, $17, $30, $0F, $2D, $21, $30, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F    ; bg, everything but water, water, null, null
     .byte $0F, $0F, $16, $30, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F    ; sprite, main, null, null, null
     
-; Sprite defs: tile, attrib
-playerup0:
-    .byte $04, $00, $05, $00, $06, $00, $07, $00
-playerup1:
-    .byte $04, $00, $05, $00, $07, $40, $06, $40
-playerdown0:
-    .byte $00, $00, $01, $00, $02, $00, $03, $00
-playerdown1
-    .byte $00, $00, $01, $00, $03, $40, $02, $40
-playerleft0:
-    .byte $08, $00, $09, $00, $0A, $00, $0B, $00
-playerleft1:
-    .byte $0C, $00, $0D, $00, $0E, $00, $0F, $00
+; Sprite defs: tile, attrib 
 playerright0:
     .byte $09, $40, $08, $40, $0B, $40, $0A, $40
 playerright1:
     .byte $0D, $40, $0C, $40, $0F, $40, $0E, $40
+playerleft0:
+    .byte $08, $00, $09, $00, $0A, $00, $0B, $00
+playerleft1:
+    .byte $0C, $00, $0D, $00, $0E, $00, $0F, $00
+playerdown0:
+    .byte $00, $00, $01, $00, $02, $00, $03, $00
+playerdown1
+    .byte $00, $00, $01, $00, $03, $40, $02, $40
+playerup0:
+    .byte $04, $00, $05, $00, $06, $00, $07, $00
+playerup1:
+    .byte $04, $00, $05, $00, $07, $40, $06, $40
 
 ; ------ Interrupt vectors
     .org $FFFA
