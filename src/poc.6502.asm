@@ -368,8 +368,8 @@ MMC1NMILoadPRGBank:
 testtiles_chr: .incbin "test.chr"
 
 palette:
-    .byte $0F, $2D, $17, $30, $0F, $2D, $21, $30, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F    ; bg, everything but water, water, null, null
-    .byte $0F, $0F, $16, $30, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F    ; sprite, main, null, null, null
+    .byte $0F, $2D, $17, $30, $0F, $2D, $21, $30, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F    ; bg - everything but water, water, null, null
+    .byte $0F, $0F, $16, $30, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F, $0F    ; sprite - main, null, null, null
     
 ; Sprite defs: tile, attrib 
 playerright0:
