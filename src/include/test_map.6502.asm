@@ -1,9 +1,11 @@
 test_map_header:
     .b $32                  ; width in 16x16 metatiles
     .b $32                  ; height in 16x16 metatiles
-    .w @horizontalcodings   ; pointer to the codings
+    .w @horizontalcodings   ; pointer to the tile codings
+    .w @attributecodings    ; pointer to the attribute codings
     ; other metadata we might need would go here, like loading a specific tileset into CHR RAM or
     ; info about interactables or the encounter table
+    ; also probably need the defined metatiles for this map
 
 ; Codings for our map; because each is variable length we need a lookup table
 @horizontalcodings:
@@ -19,6 +21,7 @@ test_map_header:
     .w  @a11, @a12, @a13, @a14, @a15, @a16, @a17, @a18, @a19, @a20
     .w  @a21, @a22, @a23, @a24, @a25
 
+;----- Tiles
 @h1: 
     .b $32, $00, $FF
 @h2: 
@@ -120,19 +123,7 @@ test_map_header:
 @h50:
     .b $32, $00, $FF
 
-; TODO: real values
-; While I can generate an attribute version of the map and run it through RLE encoder, the values it spits out don't cleanly
-; map to attribute identifiers, and since I can't differntiate between "do the next byte N types" and a value with find/replace
-; have two options.  Option one is for RLE encoder to take in a flag that it's doing attributes and modify the output to spit
-; out constants.  This is a reasonably large rewrite; probably would need to swap RLE encode from creating a vector of chars
-; to a vector of shorts and then having the upper half be the "is this an attribute or not" marker and adjust the "char_to_hex"
-; method to handle that.
-; The second option would be for me to pass in information about "black is 00, blue is 01" or the like and then instead of it
-; assigning codes incrementally it does so by constructing the codes logically for the metatile.  I probably want some functionality
-; like that anyway to get better metatile codings for maps anyway; pass in a file of bitmap filename to coding and it uses that
-; to figure out how to assign codes.  Leave in the existing "do it arbitrarily", but if the file is specified use that
-; to construct the tile to coding map and then we can skip the entirety of the "build that ourselves".
-; I'm liking this second option.
+;----- Attributes
 @a1:
     .b $19, $00, $FF
 @a2:
@@ -140,46 +131,50 @@ test_map_header:
 @a3:
     .b $19, $00, $FF
 @a4:
-    .b $19, $00, $FF
+    .b $03, $00, $89, $40, $50, $50, $44, $00, $10, $44, $00, $44, $08, $00, $81, $11, $04, $00, $FF
 @a5:
-    .b $19, $00, $FF
+    .b $03, $00, $89, $44, $00, $04, $44, $00, $11, $04, $11, $05, $08, $00, $81, $11, $04, $00, $FF
 @a6:
-    .b $19, $00, $FF
+    .b $03, $00, $8b, $04, $05, $05, $04, $40, $51, $50, $11, $00, $00, $44, $06, $00, $81, $11, $04, $00, $FF
 @a7:
-    .b $19, $00, $FF
+    .b $03, $00, $04, $05, $87, $00, $11, $00, $01, $00, $00, $44, $06, $00, $81, $11, $04, $00, $FF
 @a8:
-    .b $19, $00, $FF
+    .b $08, $00, $81, $11, $04, $00, $81, $44, $06, $00, $81, $11, $04, $00, $FF
 @a9:
-    .b $19, $00, $FF
+    .b $08, $00, $81, $11, $04, $00, $81, $44, $06, $00, $81, $11, $04, $00, $FF
 @a10:
-    .b $19, $00, $FF
+    .b $08, $00, $81, $11, $04, $00, $81, $44, $06, $00, $81, $11, $04, $00, $FF
 @a11:
-    .b $19, $00, $FF
+    .b $08, $00, $81, $11, $04, $00, $81, $44, $06, $00, $81, $11, $04, $00, $FF
 @a12:
-    .b $19, $00, $FF
+    .b $03, $00, $03, $05, $83, $01, $00, $11, $04, $00, $81, $44, $0b, $00, $FF
 @a13:
-    .b $19, $00, $FF
+    .b $08, $00, $81, $11, $04, $00, $81, $44, $03, $05, $81, $01, $07, $00, $FF
 @a14:
-    .b $19, $00, $FF
+    .b $08, $00, $81, $11, $04, $00, $81, $44, $06, $00, $81, $11, $04, $00, $FF
 @a15:
-    .b $19, $00, $FF
+    .b $05, $00, $84, $40, $00, $00, $11, $04, $00, $81, $44, $06, $00, $81, $11, $04, $00, $FF
 @a16:
-    .b $19, $00, $FF
+    .b $05, $00, $84, $44, $00, $00, $11, $04, $00, $81, $44, $06, $00, $81, $11, $04, $00, $FF
 @a17:
-    .b $19, $00, $FF
+    .b $05, $00, $84, $44, $00, $00, $11, $04, $00, $81, $44, $06, $00, $81, $11, $04, $00, $FF
 @a18:
-    .b $19, $00, $FF
+    .b $05, $00, $84, $44, $00, $00, $11, $04, $00, $81, $44, $06, $00, $81, $11, $04, $00, $FF
 @a19:
-    .b $19, $00, $FF
+    .b $05, $00, $84, $44, $00, $00, $11, $04, $00, $81, $44, $06, $00, $81, $11, $04, $00, $FF
 @a20:
-    .b $19, $00, $FF
+    .b $05, $00, $84, $44, $00, $00, $11, $04, $00, $81, $44, $06, $00, $81, $11, $04, $00, $FF
 @a21:
-    .b $19, $00, $FF
+    .b $05, $00, $84, $44, $00, $00, $11, $04, $00, $81, $44, $06, $00, $81, $11, $04, $00, $FF
 @a22:
-    .b $19, $00, $FF
+    .b $05, $00, $84, $04, $00, $00, $01, $04, $00, $81, $44, $06, $00, $81, $11, $04, $00, $FF
 @a23:
-    .b $19, $00, $FF            ; last without water
+    .b $19, $00, $FF
 @a24:
     .b $19, $00, $FF
 @a25:
     .b $19, $00, $FF
+
+; Last byte as of this commit is $85DE, so we use 1502 bytes.  Max capacity of one bank is 16k, so we've used less than a tenth.
+; Looking at the entire capacity of MMC1 we've used 1/124th.  So it's a good thing we're compressing given it would be at least twice
+; this size uncompressed.
