@@ -7,13 +7,17 @@
     .setting "LaunchCommAND", "c:\\emulation\\fceux.exe {0}"
     .setting "DebugCommAND", "c:\\emulation\\fceux.exe {0}"
 
-    ; Constants for Registers for Readability
+    ; Constants for Readability
     .include "register_defs.6502.asm"
+    .include "map_constants.6502.asm"
 
     ; Variables in RAM
     .segment "RAM"
     .org $0000                      ; Zero page
 ptr1                    .ds 2       ; Pointer for indirect addressing
+ptr2                    .ds 2       ; Pointer for indirect addressing
+param1                  .ds 1       ; Parameter for functions
+param2                  .ds 1       ; Parameter for functions
 joypad1                 .ds 1       ; Button states for current frame
 joypad1_old             .ds 1       ; Last frame's button states
 joypad1_pressed         .ds 1       ; Current frame's off_to_on transition
@@ -24,6 +28,8 @@ camera_y                .ds 1       ; Y position of the camera relative to the u
 player_frame            .ds 1       ; Animation frame for the player movement
 button_mask             .ds 1       ; Temp holder for a button mask we want to iterate through
 addend                  .ds 1       ; Temp variable when we want to add X or Y to A (STX addend)
+dbuffer_ready           .ds 1       ; Flag that NMI should update the nametable from the dbuffer
+dbuffer_index           .ds 1       ; Current position in the drawing buffer
 
     .org $0100                      ; The stack
 stack                   .ds 256     ; block off the stack
@@ -43,8 +49,11 @@ mmc1_current_config     .ds 1       ; How the MMC1 is configured so the NMI can 
 batteryram              .ds 8192    ; battery backup space - turn this into real variables
 
     .bank 0, 16, $8000, "NES_PRG0"
+    .segment "PRG0", 0
+    .org $8000
+; Pointer table to map headers
+    .w test_map_header
 
-; This is just to see how much space this eats up
     .include "test_map.6502.asm"
 
 ; TODO: Gonna have a bunch of different banks for data and maybe different subsystems (e.g. a menu bank)
@@ -176,6 +185,13 @@ NMIHandler:
     LDA #$02
     STA OAMDMA                      ; Set the high byte of OAM source and trigger the copy
 
+    LDA dbuffer_ready
+    BEQ @dbufferdone                ; See if there's data in the debuffer that's ready to output
+    LDA PPUSTATUS                   ; Clear the latch prior to drawing
+    JSR DrawDBuffer
+    STA dbuffer_ready               ; DrawDBuffer will always have 0 in A on return, use that to clear the flag
+
+@dbufferdone
     LDA mmc1_current_bank           ; Example: make sure we're in bank 0
     CMP #$00
     BEQ @noswitch
@@ -232,6 +248,22 @@ ReadJoypad:
     AND joypad1                     ; So figure out what was newly pressed
     STA joypad1_pressed
     RTS
+
+; Parses map data and writes the appropriate bytes to the dbuffer
+; This only gets the tile data; it assumes the calling method has set up the PPU address
+; and knows the length it wants.
+; - inputs - TODO: this needs:
+;                               what map
+;                               which row
+;                               start byte in the row
+;                               num bytes to decode
+;                  so writing a row would be 32 bytes, whereas if I'm writing a column
+;                  this would be called 30 times for 1 byte
+DecodeMapRowToDBuffer:
+    ; TODO: I need to think through the mechanics here more.  It's a combination of the sound loading code and the
+    ;       scrolling code that drwew tiles as needed; in both cases I need to get all my memory pointing correct.
+    ;       I have plenty of RAM space so don't worry about that so much.
+    RTS                    
 
 ; Update the player's sprite based on what's going on in map mode
 ; - modifies - A, Y, ptr1
@@ -311,13 +343,48 @@ LoadPlayerMapSprite:
     BCC @loop                       ; the last one we want to write is 14 
     RTS
 
+; Write what is in the drawing buffer to the nametable
+; dubffer format:
+;  byte 0: length of data (not counting target address)
+;  byte 1-2: target PPUC address (HI byte first)
+;  byte 3-n: bytes to copy
+; 0 terminated
+; Modifies:
+;  - A, X, Y
+; NOTE: only suitable for small updates such as a single strip, as this
+;  is data stored on the stack.  A full screen is 960 tiles plus 64 attributes
+DrawDBuffer:
+    LDY #$00
+@headerloop:
+    LDA stack, Y
+    BEQ @done                       ; We hit our terminator
+    TAX                             ; Number of bytes to read
+    INY
+    LDA stack, Y                    ; Set target PPU address
+    STA PPUADDR
+    INY
+    LDA stack, Y
+    STA PPUADDR
+    INY
+@copyloop:
+    LDA stack, Y                    ; Repeatedly write what's in the dbuffer to the PPU
+    STA PPUDATA
+    INY
+    DEX
+    BNE @copyloop                   ; When X is 0 we're done with this run
+    BEQ @headerloop                 ; Check for the next bit of data, and save a byte with a branch
+@done:
+    STA dbuffer_index               ; Reset the write position in the dbuffer
+    STA stack                       ; "Empty" the debuffer by having it start with the terminator.  Only way we get here is when A has 0.
+    RTS
+
 ; Configure the MMC1
 ; - input - A
 ; - modifies - A
 ; - MMC1NMIConfigure - sub call for the NMI so it won't override the configuration the main code wants set
 MMC1Configure:
     STA mmc1_current_config         ; Save our configuration in case NMI needs to change it
-beginmmc1configure:
+beginmmc1configure:                 ; Needs to be a regular label because of our two entry points
     LDA mmc1_current_config         ; If we had to loop this will restore A so we can restart
 MMC1NMIConfigure:
     PHA
@@ -343,7 +410,7 @@ MMC1NMIConfigure:
 ; - MMC1NMILoadPRGBank - sub call for the NMI so it won't override the bank the main code wants to have set
 MMC1LoadPRGBank:
     STA mmc1_current_bank           ; Save the bank we're switching to; if NMI needs to swap banks later it can use this to swap back at the end
-beginmmc1loadprgbank:
+beginmmc1loadprgbank:               ; Needs to be a regular label because of our two entry points
     LDA mmc1_current_bank           ; If we never get interrupted a bit wasteful, but this handles restoring state if we have to retry after an NMI
 MMC1NMILoadPRGBank:
     PHA
