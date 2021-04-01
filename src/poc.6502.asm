@@ -28,8 +28,9 @@ camera_y                .ds 1       ; Y position of the camera relative to the u
 player_frame            .ds 1       ; Animation frame for the player movement
 button_mask             .ds 1       ; Temp holder for a button mask we want to iterate through
 addend                  .ds 1       ; Temp variable when we want to add X or Y to A (STX addend)
-dbuffer_ready           .ds 1       ; Flag that NMI should update the nametable from the dbuffer
+dbuffer_ready           .ds 1       ; Flag that NMI should update the nametable from the dbuffer - bit 0 is horizontal, bit 1 is vertical
 dbuffer_index           .ds 1       ; Current position in the drawing buffer
+ppu_ctrl_mode                .ds 1       ; Current mode of the PPU
 
     .org $0100                      ; The stack
 stack                   .ds 256     ; block off the stack
@@ -149,6 +150,7 @@ CopyTiles:
 
     LDA #%10010000
     STA PPUCTRL                     ; Enable NMIs, sprites on nametable 1
+    STA ppu_ctrl_mode
     LDA #%00011000
     STA PPUMASK                     ; Enable sprites and background
 
@@ -187,11 +189,19 @@ NMIHandler:
 
     LDA dbuffer_ready
     BEQ @dbufferdone                ; See if there's data in the debuffer that's ready to output
+    AND #%00000010                  ; Check to see if we need to draw vertical
+    BEQ @dbufferdraw
+    LDA ppu_ctrl_mode
+    ORA #%00000100                  ; If we're drawing vertical need to set the ADDR increment
+    STA PPUCTRL
+@dbufferdraw:
     LDA PPUSTATUS                   ; Clear the latch prior to drawing
     JSR DrawDBuffer
     STA dbuffer_ready               ; DrawDBuffer will always have 0 in A on return, use that to clear the flag
+    LDA ppu_ctrl_mode
+    STA PPUCTRL                     ; Reset the state of ctrl in case we were drawing vertical
 
-@dbufferdone
+@dbufferdone:
     LDA mmc1_current_bank           ; Example: make sure we're in bank 0
     CMP #$00
     BEQ @noswitch
@@ -261,7 +271,7 @@ ReadJoypad:
 ;                  this would be called 30 times for 1 byte
 DecodeMapRowToDBuffer:
     ; TODO: I need to think through the mechanics here more.  It's a combination of the sound loading code and the
-    ;       scrolling code that drwew tiles as needed; in both cases I need to get all my memory pointing correct.
+    ;       scrolling code that drew tiles as needed; in both cases I need to get all my memory pointing correct.
     ;       I have plenty of RAM space so don't worry about that so much.
     RTS                    
 
